@@ -45,7 +45,15 @@ func (app *Application) mount() http.Handler {
 		r.Get("/health", app.HealthCheck)
 		r.Route("/post", func(r chi.Router) {
 			r.Post("/", app.CreatPostHandler)
-			r.Get("/{id}", app.GetPostHandler)
+			r.Route("/{id}", func(r chi.Router) {
+				// MIDDLEWARE TO ACCESS THE ID AND FETCH POST
+				r.Use(app.PostMiddleware)
+
+				r.Get("/", app.GetPostHandler)
+				r.Delete("/", app.DeletePostHandler)
+				r.Patch("/", app.UpdatePostHandler)
+			})
+
 		})
 
 	})

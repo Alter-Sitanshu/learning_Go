@@ -23,7 +23,7 @@ func ReadJSON(w http.ResponseWriter, r *http.Request, data any) error {
 	return decoder.Decode(data)
 }
 
-func WriteJSON(w http.ResponseWriter, data any, status int) error {
+func WriteJSON(w http.ResponseWriter, status int, data any) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 

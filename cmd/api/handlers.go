@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,10 +12,20 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+type PostKey string
+
+const postctx PostKey = "post"
+
 type PostPayload struct {
 	Title   string   `json:"title" validate:"required,max=250"`
 	Content string   `json:"content" validate:"required,max=1024"`
 	Tags    []string `json:"tags"`
+}
+
+// Payload struct for updating Posts
+type PostMutate struct {
+	Title   *string `json:"title" validate:"omitempty,max=100"`
+	Content *string `json:"content" validate:"omitempty,max=1000"`
 }
 
 type Response struct {
@@ -58,35 +69,123 @@ func (app *Application) CreatPostHandler(w http.ResponseWriter, r *http.Request)
 		w.Write([]byte(fmt.Sprintf("Error creating post into database\n: %v", err)))
 		return
 	}
-	if err := WriteJSON(w, post, http.StatusCreated); err != nil {
+	if err := jsonResponse(w, http.StatusCreated, post); err != nil {
 		log.Printf("Error while encoding post: %s", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("Error encoding post\n"))
 		return
 	}
-	WriteJSON(w, post, http.StatusCreated)
+	jsonResponse(w, http.StatusCreated, post)
 }
 
 func (app *Application) GetPostHandler(w http.ResponseWriter, r *http.Request) {
-	postID := chi.URLParam(r, "id")
-	id, err := strconv.ParseInt(postID, 10, 64)
-	if err != nil {
-		log.Printf("Invalid id param received: %s", err.Error())
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(Response{
-			Message: "ID should be integer.",
-		})
-		return
+	res := Response{
+		Message: "OK",
 	}
-	ctx := r.Context()
-	post, err := app.store.Post().GetPostByID(ctx, id)
+	post := getPostbyctx(r)
+
+	comments, err := app.store.Comment().GetComments(r.Context(), post.ID)
 	if err != nil {
 		log.Printf("DB Error occured: %s", err.Error())
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(Response{
-			Message: "Post Not Found",
-		})
+		res.Message = "Error loading comments"
+		jsonResponse(w, http.StatusInternalServerError, res)
 		return
 	}
-	WriteJSON(w, post, http.StatusOK)
+	post.Comments = comments
+	jsonResponse(w, http.StatusOK, post)
+}
+
+func (app *Application) DeletePostHandler(w http.ResponseWriter, r *http.Request) {
+	res := Response{
+		Message: "Record Deleted",
+	}
+	post := getPostbyctx(r)
+
+	err := app.store.Post().DeletePost(r.Context(), post.ID)
+	if err != nil {
+		log.Printf("DB error: %v", err.Error())
+		res.Message = "Server error"
+		jsonResponse(w, http.StatusInternalServerError, res)
+		return
+	}
+	jsonResponse(w, http.StatusOK, res)
+}
+
+func (app *Application) UpdatePostHandler(w http.ResponseWriter, r *http.Request) {
+
+	res := Response{
+		Message: "Record Updated",
+	}
+	post := getPostbyctx(r)
+	var updatepayload PostMutate
+
+	if err := ReadJSON(w, r, &updatepayload); err != nil {
+		res.Message = "Incorrect data format"
+		jsonResponse(w, http.StatusBadRequest, res)
+		return
+	}
+	if err := Validate.Struct(updatepayload); err != nil {
+		res.Message = "Incorrect data format"
+		jsonResponse(w, http.StatusBadRequest, res)
+		return
+	}
+
+	if updatepayload.Title != nil {
+		post.Title = *updatepayload.Title
+	}
+	if updatepayload.Content != nil {
+		post.Content = *updatepayload.Content
+	}
+
+	err := app.store.Post().UpdatePost(r.Context(), post)
+	if err != nil {
+		log.Printf("DB error: %v", err.Error())
+		res.Message = "Server Error"
+		jsonResponse(w, http.StatusInternalServerError, res)
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, res)
+}
+
+func (app *Application) PostMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		postID := chi.URLParam(r, "id")
+		id, err := strconv.ParseInt(postID, 10, 64)
+		res := Response{
+			Message: "OK",
+		}
+		if err != nil {
+			log.Printf("Invalid id param received: %s", err.Error())
+			res.Message = "ID should be an integer"
+			jsonResponse(w, http.StatusBadRequest, res)
+			return
+		}
+		ctx := r.Context()
+		post, err := app.store.Post().GetPostByID(ctx, id)
+		if err != nil {
+			log.Printf("DB Error occured: %s", err.Error())
+			res.Message = "Not Found"
+			jsonResponse(w, http.StatusNotFound, res)
+			return
+		}
+		ctx = context.WithValue(ctx, postctx, post)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func getPostbyctx(r *http.Request) *database.Post {
+	post := r.Context().Value(postctx).(*database.Post)
+	return post
+}
+
+func jsonResponse(w http.ResponseWriter, status int, data any) error {
+	type envelope struct {
+		Data any `json:"data"`
+	}
+	err := WriteJSON(w, status, &envelope{Data: data})
+	if err != nil {
+		return err
+	}
+	return nil
 }

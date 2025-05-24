@@ -13,11 +13,18 @@ type UserInterface interface {
 type PostInterface interface {
 	Create(context.Context, *Post) error
 	GetPostByID(context.Context, int64) (*Post, error)
+	DeletePost(context.Context, int64) error
+	UpdatePost(context.Context, *Post) error
+}
+
+type CommentInterface interface {
+	GetComments(context.Context, int64) ([]Comment, error)
 }
 
 type Storage interface {
 	User() UserInterface
 	Post() PostInterface
+	Comment() CommentInterface
 }
 
 type PostgresRepo struct {
@@ -38,4 +45,8 @@ func (psql *PostgresRepo) User() UserInterface {
 
 func (psql *PostgresRepo) Post() PostInterface {
 	return &PostStore{db: psql.db}
+}
+
+func (psql *PostgresRepo) Comment() CommentInterface {
+	return &CommentStore{db: psql.db}
 }

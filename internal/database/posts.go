@@ -3,18 +3,20 @@ package database
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"github.com/lib/pq"
 )
 
 type Post struct {
-	ID        int64    `json:"id"`
-	Title     string   `json:"title"`
-	Content   string   `json:"content"`
-	UserID    int64    `json:"user"`
-	Tags      []string `json:"tags"`
-	CreatedAt string   `json:"created_at"`
-	UpdatedAt string   `json:"updated_at"`
+	ID        int64     `json:"id"`
+	Title     string    `json:"title"`
+	Content   string    `json:"content"`
+	UserID    int64     `json:"user"`
+	Tags      []string  `json:"tags"`
+	CreatedAt string    `json:"created_at"`
+	UpdatedAt string    `json:"updated_at"`
+	Comments  []Comment `json:"comments"`
 }
 
 type PostStore struct {
@@ -61,6 +63,47 @@ func (p *PostStore) Create(ctx context.Context, post *Post) error {
 	)
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+func (p *PostStore) DeletePost(ctx context.Context, postID int64) error {
+	query := `
+		DELETE FROM posts
+		WHERE id = $1
+	`
+
+	result, err := p.db.ExecContext(ctx, query, postID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("multiple rows affected in db: %d", rows)
+	}
+	return nil
+}
+
+func (p *PostStore) UpdatePost(ctx context.Context, post *Post) error {
+	query := `
+		UPDATE posts
+		SET title = $1, content = $2
+		WHERE id = $3
+	`
+
+	result, err := p.db.ExecContext(ctx, query, post.Title, post.Content, post.ID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("multiple rows affected in db: %d", rows)
 	}
 	return nil
 }
