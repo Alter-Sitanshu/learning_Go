@@ -21,11 +21,22 @@ type PostStore struct {
 	db *sql.DB
 }
 
-func (p *PostStore) GetPostByID(id int) (*Post, error) {
-	row := p.db.QueryRow("SELECT * FROM posts WHERE id=$1", id)
+func (p *PostStore) GetPostByID(ctx context.Context, id int64) (*Post, error) {
+	query := `
+		SELECT id, title, content, userid, tags, created_at
+	    FROM posts 
+		WHERE id=$1
+	`
 
 	var post Post
-	err := row.Scan(&post.ID, &post.Title)
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&post.ID,
+		&post.Title,
+		&post.Content,
+		&post.UserID,
+		pq.Array(&post.Tags),
+		&post.CreatedAt,
+	)
 	if err != nil {
 		return nil, err
 	}

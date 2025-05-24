@@ -7,12 +7,12 @@ import (
 
 type UserInterface interface {
 	Create(context.Context, *User) error
-	GetUserByID(int) (*User, error)
+	GetUserByID(context.Context, int64) (*User, error)
 }
 
 type PostInterface interface {
 	Create(context.Context, *Post) error
-	GetPostByID(int) (*Post, error)
+	GetPostByID(context.Context, int64) (*Post, error)
 }
 
 type Storage interface {

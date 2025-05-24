@@ -42,8 +42,11 @@ func (app *Application) mount() http.Handler {
 
 	// Routes for the API
 	router.Route("/v1", func(r chi.Router) {
-
 		r.Get("/health", app.HealthCheck)
+		r.Route("/post", func(r chi.Router) {
+			r.Post("/", app.CreatPostHandler)
+			r.Get("/{id}", app.GetPostHandler)
+		})
 
 	})
 
@@ -59,10 +62,6 @@ func (app *Application) run(mux http.Handler) error {
 		IdleTimeout:  time.Minute,
 	}
 
-	fmt.Printf("Server listening on port 8080 at http://localhost:%s\n", app.config.addr)
+	fmt.Printf("Server listening at http://localhost%s\n", app.config.addr)
 	return server.ListenAndServe()
-}
-
-func (app *Application) HealthCheck(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("OK\n"))
 }

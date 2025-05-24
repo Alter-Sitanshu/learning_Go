@@ -18,13 +18,13 @@ type UserStore struct {
 	db *sql.DB
 }
 
-func (u *UserStore) GetUserByID(id int) (*User, error) {
+func (u *UserStore) GetUserByID(ctx context.Context, id int64) (*User, error) {
 	query := `
-		SELECT (id, name, email, age, gender) FROM users 
+		SELECT id, name, email, age, gender FROM users 
 		WHERE id=$1 RETURNING id,name,email,age,gender
 	`
 	var user User
-	err := u.db.QueryRow(query, id).Scan(
+	err := u.db.QueryRowContext(ctx, query, id).Scan(
 		&user.ID,
 		&user.Name,
 		&user.Email,
@@ -40,7 +40,7 @@ func (u *UserStore) GetUserByID(id int) (*User, error) {
 
 func (u *UserStore) Create(ctx context.Context, user *User) error {
 	query := `
-		INSERT INTO users (name, passw, email, age, gender)
+		INSERT INTO users (name, password, email, age, gender)
 		VALUES($1, $2, $3) RETURNING id
 	`
 	err := u.db.QueryRowContext(ctx, query,
