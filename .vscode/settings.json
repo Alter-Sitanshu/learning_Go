@@ -1,0 +1,14 @@
+{
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "golang-db-1",
+            "database": "social",
+            "username": "root",
+            "password": "supremo200%"
+        }
+    ]
+}

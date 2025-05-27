@@ -36,6 +36,22 @@ func (app *Application) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK\n"))
 }
 
+func getPostbyctx(r *http.Request) *database.Post {
+	post := r.Context().Value(postctx).(*database.Post)
+	return post
+}
+
+func jsonResponse(w http.ResponseWriter, status int, data any) error {
+	type envelope struct {
+		Data any `json:"data"`
+	}
+	err := WriteJSON(w, status, &envelope{Data: data})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (app *Application) CreatPostHandler(w http.ResponseWriter, r *http.Request) {
 	var payload PostPayload
 	if err := ReadJSON(w, r, &payload); err != nil {
@@ -174,18 +190,41 @@ func (app *Application) PostMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func getPostbyctx(r *http.Request) *database.Post {
-	post := r.Context().Value(postctx).(*database.Post)
-	return post
-}
+func (app *Application) CreateCommentHandler(w http.ResponseWriter, r *http.Request) {
+	post := getPostbyctx(r)
+	var comment database.Comment
+	res := Response{
+		Message: "Comment added",
+	}
+	type commentPayload struct {
+		Content string `json:"content" validate:"max=100"`
+	}
+	var payload commentPayload
 
-func jsonResponse(w http.ResponseWriter, status int, data any) error {
-	type envelope struct {
-		Data any `json:"data"`
+	// TODO : Change after Auth
+	userid := int64(1)
+
+	if err := ReadJSON(w, r, &payload); err != nil {
+		res.Message = "Incorrect data format"
+		jsonResponse(w, http.StatusBadRequest, res)
+		return
 	}
-	err := WriteJSON(w, status, &envelope{Data: data})
+	if err := Validate.Struct(payload); err != nil {
+		res.Message = "Validation failed: content may be too long"
+		jsonResponse(w, http.StatusBadRequest, res)
+		return
+	}
+	comment.Content = payload.Content
+	comment.Postid = post.ID
+	comment.Userid = userid
+
+	err := app.store.Comment().CreateComment(r.Context(), &comment)
 	if err != nil {
-		return err
+		log.Printf("DB error: %v", err.Error())
+		res.Message = "Server Error"
+		jsonResponse(w, http.StatusInternalServerError, res)
+		return
 	}
-	return nil
+
+	jsonResponse(w, http.StatusOK, res)
 }

@@ -52,8 +52,22 @@ func (app *Application) mount() http.Handler {
 				r.Get("/", app.GetPostHandler)
 				r.Delete("/", app.DeletePostHandler)
 				r.Patch("/", app.UpdatePostHandler)
+				r.Post("/comment", app.CreateCommentHandler)
 			})
 
+		})
+		r.Route("/users", func(r chi.Router) {
+			r.Route("/{userID}", func(r chi.Router) {
+				// User Middleware
+				r.Use(app.UserctxMiddleware)
+
+				r.Get("/", app.GetUserHandler)
+				r.Put("/follow", app.FollowUser)
+				r.Put("/unfollow", app.UnfollowUser)
+			})
+			r.Group(func(r chi.Router) {
+				r.Get("/feed", app.GetFeedHandler)
+			})
 		})
 
 	})

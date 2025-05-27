@@ -12,11 +12,13 @@ type Post struct {
 	ID        int64     `json:"id"`
 	Title     string    `json:"title"`
 	Content   string    `json:"content"`
-	UserID    int64     `json:"user"`
+	UserID    int64     `json:"userid"`
 	Tags      []string  `json:"tags"`
 	CreatedAt string    `json:"created_at"`
-	UpdatedAt string    `json:"updated_at"`
+	UpdatedAt string    `json:"updated_at,omitempty"`
+	Version   int       `json:"version,omitempty"`
 	Comments  []Comment `json:"comments"`
+	User      User      `json:"user"`
 }
 
 type PostStore struct {
@@ -29,6 +31,9 @@ func (p *PostStore) GetPostByID(ctx context.Context, id int64) (*Post, error) {
 	    FROM posts 
 		WHERE id=$1
 	`
+
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeOut)
+	defer cancel()
 
 	var post Post
 	err := p.db.QueryRowContext(ctx, query, id).Scan(
@@ -51,6 +56,9 @@ func (p *PostStore) Create(ctx context.Context, post *Post) error {
 		INSERT INTO posts (title, content, userid, tags)
 		VALUES($1, $2, $3, $4) RETURNING id, created_at, updated_at
 	`
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeOut)
+	defer cancel()
+
 	err := p.db.QueryRowContext(ctx, query,
 		post.Title,
 		post.Content,
@@ -73,6 +81,9 @@ func (p *PostStore) DeletePost(ctx context.Context, postID int64) error {
 		WHERE id = $1
 	`
 
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeOut)
+	defer cancel()
+
 	result, err := p.db.ExecContext(ctx, query, postID)
 	if err != nil {
 		return err
@@ -90,11 +101,13 @@ func (p *PostStore) DeletePost(ctx context.Context, postID int64) error {
 func (p *PostStore) UpdatePost(ctx context.Context, post *Post) error {
 	query := `
 		UPDATE posts
-		SET title = $1, content = $2
-		WHERE id = $3
+		SET title = $1, content = $2, version = version + 1
+		WHERE id = $3 AND version = $4
 	`
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeOut)
+	defer cancel()
 
-	result, err := p.db.ExecContext(ctx, query, post.Title, post.Content, post.ID)
+	result, err := p.db.ExecContext(ctx, query, post.Title, post.Content, post.ID, post.Version)
 	if err != nil {
 		return err
 	}

@@ -3,11 +3,20 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"time"
 )
+
+const QueryTimeOut = time.Minute * 3
+
+var ErrNotFound = errors.New("not found")
 
 type UserInterface interface {
 	Create(context.Context, *User) error
 	GetUserByID(context.Context, int64) (*User, error)
+	Follow(context.Context, int64, int64) error
+	Unfollow(context.Context, int64, int64) error
+	GetFeed(context.Context, int64, *FilteringQuery) ([]Feed, error)
 }
 
 type PostInterface interface {
@@ -19,6 +28,7 @@ type PostInterface interface {
 
 type CommentInterface interface {
 	GetComments(context.Context, int64) ([]Comment, error)
+	CreateComment(context.Context, *Comment) error
 }
 
 type Storage interface {
