@@ -2,9 +2,11 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"github.com/Alter-Sitanshu/learning_Go/internal/database"
 	"github.com/Alter-Sitanshu/learning_Go/internal/env"
+	"github.com/Alter-Sitanshu/learning_Go/internal/mailer"
 	"github.com/joho/godotenv"
 )
 
@@ -23,6 +25,14 @@ func main() {
 			MaxIdleConns: 5,
 			MaxIdleTime:  15, // in minutes
 		},
+		mail: mailer.SMTPConfig{
+			Host:     "smtp.gmail.com",
+			Port:     587,
+			Username: env.GetString("COMPANY", "example@gmail.com"),
+			Password: env.GetString("SMTP_PASS", ""),
+			From:     env.GetString("COMP_ADDR", "example@gmail.com"),
+			Expiry:   time.Hour * 24 * 3,
+		},
 	}
 
 	// Database initialisation
@@ -37,10 +47,12 @@ func main() {
 	}
 	defer db.Close()
 	psql := database.NewPostgresStorage(db)
+	mailer := mailer.NewSMTPSender(cfg.mail)
 
 	app := &Application{
 		config: cfg,
 		store:  psql,
+		mailer: mailer,
 	}
 
 	// Server Mux and Routing

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Alter-Sitanshu/learning_Go/internal/database"
+	"github.com/Alter-Sitanshu/learning_Go/internal/mailer"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -13,12 +14,15 @@ import (
 type Application struct {
 	config Config
 	store  database.Storage
+	mailer *mailer.SMTPSender
 }
 
 type Config struct {
 	addr string
 	db   DBConfig
+	mail mailer.SMTPConfig
 }
+
 type DBConfig struct {
 	addr         string
 	MaxConns     int
@@ -64,10 +68,15 @@ func (app *Application) mount() http.Handler {
 				r.Get("/", app.GetUserHandler)
 				r.Put("/follow", app.FollowUser)
 				r.Put("/unfollow", app.UnfollowUser)
+				r.Delete("/", app.DeleteUserHandler)
 			})
 			r.Group(func(r chi.Router) {
 				r.Get("/feed", app.GetFeedHandler)
 			})
+		})
+		r.Route("/auth", func(r chi.Router) {
+			r.Put("/activate/{token}", app.AuthoriseHandler)
+			r.Post("/user", app.CreateUserHandler)
 		})
 
 	})

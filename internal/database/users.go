@@ -2,18 +2,46 @@ package database
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"time"
 
 	"github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type User struct {
-	ID       int64  `json:"id,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Password string `json:"-"`
-	Email    string `json:"email,omitempty"`
-	Age      int    `json:"age,omitempty"`
-	Gender   byte   `json:"gender,omitempty"` // either 0(M) or 1(F)
+	ID       int64    `json:"id,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	Password password `json:"-"`
+	Email    string   `json:"email,omitempty"`
+	Age      int      `json:"age,omitempty"`
+	Gender   byte     `json:"gender,omitempty"` // either 0(M) or 1(F)
+	Active   bool     `json:"is_active,omitempty"`
+}
+
+type password struct {
+	text *string
+	hash []byte
+}
+
+type UserFromToken struct {
+	id     int64
+	name   string
+	email  string
+	active bool
+}
+
+func (pass *password) Hash(text string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(text), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	pass.text = &text
+	pass.hash = hash
+
+	return nil
 }
 
 type Feed struct {
@@ -50,14 +78,17 @@ func (u *UserStore) GetUserByID(ctx context.Context, id int64) (*User, error) {
 	return &user, nil
 }
 
-func (u *UserStore) Create(ctx context.Context, user *User) error {
+func (u *UserStore) create(ctx context.Context, tx *sql.Tx, user *User) error {
 	query := `
 		INSERT INTO users (name, password, email, age, gender)
-		VALUES($1, $2, $3) RETURNING id
+		VALUES($1, $2, $3, $4, $5) RETURNING id
 	`
-	err := u.db.QueryRowContext(ctx, query,
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeOut)
+	defer cancel()
+
+	err := tx.QueryRowContext(ctx, query,
 		user.Name,
-		user.Password,
+		user.Password.hash,
 		user.Email,
 		user.Age,
 		user.Gender,
@@ -135,4 +166,117 @@ func (u *UserStore) GetFeed(ctx context.Context, userID int64, fq *FilteringQuer
 	}
 	return output, nil
 
+}
+
+func (u *UserStore) CreateAndInvite(ctx context.Context, user *User,
+	token string, expiry time.Duration) error {
+	return withTx(u.db, ctx, func(tx *sql.Tx) error {
+		err := u.create(ctx, tx, user)
+		if err != nil {
+			return err
+		}
+		err = createNewToken(ctx, tx, expiry, user.ID, token)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+}
+
+func createNewToken(ctx context.Context, tx *sql.Tx,
+	exp time.Duration, userid int64, token string) error {
+
+	query := `
+		INSERT INTO user_tokens (userid, token, expiry)
+		VALUES($1, $2, $3)
+	`
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeOut)
+	defer cancel()
+
+	_, err := tx.ExecContext(ctx, query, userid, token, time.Now().Add(exp))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+func (u *UserStore) authorise(ctx context.Context, tx *sql.Tx, token string,
+	expiry time.Time) (*UserFromToken, error) {
+	query := `
+		SELECT u.id, u.name, u.email, u.is_active
+		FROM users u
+		JOIN user_tokens ut ON ut.userid = u.id
+		WHERE ut.token = $1 AND ut.expiry > $2 AND u.is_active = false
+	`
+	user := &UserFromToken{}
+	hashtoken := sha256.Sum256([]byte(token))
+	hash := hex.EncodeToString(hashtoken[:])
+	err := tx.QueryRowContext(ctx, query, hash, expiry).Scan(
+		&user.id,
+		&user.name,
+		&user.email,
+		&user.active,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (u *UserStore) ActivateUser(ctx context.Context, token string, expiry time.Time) error {
+	return withTx(u.db, ctx, func(tx *sql.Tx) error {
+
+		ctx, cancel := context.WithTimeout(ctx, QueryTimeOut)
+		defer cancel()
+
+		user, err := u.authorise(ctx, tx, token, expiry)
+		if err != nil {
+			switch err {
+			case sql.ErrNoRows:
+				return ErrTokenExpired
+			default:
+				return err
+			}
+		}
+
+		query := `
+			UPDATE users
+			SET is_active = true
+			WHERE id = $1
+		`
+		_, err = tx.ExecContext(ctx, query, user.id)
+		if err != nil {
+			return err
+		}
+
+		query = `
+			DELETE FROM user_tokens
+			WHERE userid = $1
+		`
+		_, err = tx.ExecContext(ctx, query, user.id)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+}
+
+func (u *UserStore) DeleteUser(ctx context.Context, user *User) error {
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeOut)
+	defer cancel()
+
+	return withTx(u.db, ctx, func(tx *sql.Tx) error {
+		query := `
+			DELETE FROM users
+			WHERE id = $1
+		`
+		_, err := tx.ExecContext(ctx, query, user.ID)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
 }

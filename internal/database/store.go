@@ -9,14 +9,21 @@ import (
 
 const QueryTimeOut = time.Minute * 3
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound     = errors.New("not found")
+	ErrTokenExpired = errors.New("invalid or expired token")
+)
 
 type UserInterface interface {
-	Create(context.Context, *User) error
+	create(context.Context, *sql.Tx, *User) error
 	GetUserByID(context.Context, int64) (*User, error)
 	Follow(context.Context, int64, int64) error
 	Unfollow(context.Context, int64, int64) error
 	GetFeed(context.Context, int64, *FilteringQuery) ([]Feed, error)
+	CreateAndInvite(context.Context, *User, string, time.Duration) error
+	authorise(context.Context, *sql.Tx, string, time.Time) (*UserFromToken, error)
+	DeleteUser(context.Context, *User) error
+	ActivateUser(context.Context, string, time.Time) error
 }
 
 type PostInterface interface {
