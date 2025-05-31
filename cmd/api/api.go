@@ -1,8 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/Alter-Sitanshu/learning_Go/internal/auth"
@@ -110,6 +116,31 @@ func (app *Application) run(mux http.Handler) error {
 		IdleTimeout:  time.Minute,
 	}
 
+	// graceful shutdown
+	shutdown := make(chan error)
+	go func() {
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+		s := <-quit // indefinitely waits for quit to end a signal
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*5)
+		defer cancel()
+
+		log.Printf("signal caught: %s", s.String())
+		shutdown <- server.Shutdown(ctx)
+	}()
+
 	fmt.Printf("Server listening at http://localhost%s\n", app.config.addr)
-	return server.ListenAndServe()
+	err := server.ListenAndServe()
+	if !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+
+	err = <-shutdown
+	if err != nil {
+		log.Println(err.Error())
+	}
+
+	log.Println("Server Shutdown successful")
+	return nil
 }

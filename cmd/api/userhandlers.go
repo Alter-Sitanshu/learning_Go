@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -27,46 +26,37 @@ type UserPayload struct {
 	Email    string `json:"email" validate:"min=12"`
 }
 
-func (app *Application) UserctxMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		userid := chi.URLParam(r, "userID")
-		id, err := strconv.ParseInt(userid, 10, 64)
-		res := Response{}
-		if err != nil {
-			log.Println("Could not parse user id.")
-			res.Message = "id should only contain integers."
-			jsonResponse(w, http.StatusBadRequest, res)
-			return
-		}
-
-		user, err := app.store.User().GetUserByID(ctx, id)
-		if err != nil {
-			log.Printf("DB error: %v\n", err.Error())
-			switch {
-			case errors.Is(err, database.ErrNotFound):
-				res.Message = "User not found"
-				jsonResponse(w, http.StatusNotFound, res)
-				return
-			default:
-				res.Message = "Server error"
-				jsonResponse(w, http.StatusInternalServerError, res)
-				return
-			}
-		}
-
-		ctx = context.WithValue(ctx, userctx, user)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
 func getUserFromCtx(r *http.Request) *database.User {
 	user, _ := r.Context().Value(userctx).(*database.User)
 	return user
 }
 
 func (app *Application) GetUserHandler(w http.ResponseWriter, r *http.Request) {
-	user := getUserFromCtx(r)
+	ctx := r.Context()
+	userid := chi.URLParam(r, "userID")
+	id, err := strconv.ParseInt(userid, 10, 64)
+	res := Response{}
+	if err != nil {
+		log.Println("Could not parse user id.")
+		res.Message = "id should only contain integers."
+		jsonResponse(w, http.StatusBadRequest, res)
+		return
+	}
+
+	user, err := app.store.User().GetUserByID(ctx, id)
+	if err != nil {
+		log.Printf("DB error: %v\n", err.Error())
+		switch {
+		case errors.Is(err, database.ErrNotFound):
+			res.Message = "User not found"
+			jsonResponse(w, http.StatusNotFound, res)
+			return
+		default:
+			res.Message = "Server error"
+			jsonResponse(w, http.StatusInternalServerError, res)
+			return
+		}
+	}
 	jsonResponse(w, http.StatusOK, user)
 }
 
