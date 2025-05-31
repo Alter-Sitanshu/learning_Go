@@ -19,6 +19,7 @@ type User struct {
 	Age      int      `json:"age,omitempty"`
 	Gender   byte     `json:"gender,omitempty"` // either 0(M) or 1(F)
 	Active   bool     `json:"is_active,omitempty"`
+	Role     int      `json:"role,omitempty"`
 }
 
 type password struct {
@@ -43,6 +44,9 @@ func (pass *password) Hash(text string) error {
 
 	return nil
 }
+func (pass *password) CheckPassword(plainPassword string) error {
+	return bcrypt.CompareHashAndPassword(pass.hash, []byte(plainPassword))
+}
 
 type Feed struct {
 	Post         Post `json:"post"`
@@ -55,16 +59,48 @@ type UserStore struct {
 
 func (u *UserStore) GetUserByID(ctx context.Context, id int64) (*User, error) {
 	query := `
-		SELECT id, name, email, age, gender FROM users 
-		WHERE id=$1 RETURNING id,name,email,age,gender
+		SELECT id, name, password, email, age, gender, role
+		FROM users 
+		WHERE id=$1 AND is_active = true
+		RETURNING id,name,email,age,gender
 	`
 	var user User
 	err := u.db.QueryRowContext(ctx, query, id).Scan(
 		&user.ID,
 		&user.Name,
+		&user.Password.hash,
 		&user.Email,
 		&user.Age,
 		&user.Gender,
+		&user.Role,
+	)
+	if err != nil {
+		switch err {
+		case sql.ErrNoRows:
+			return nil, ErrNotFound
+		default:
+			return nil, err
+		}
+	}
+
+	return &user, nil
+}
+
+func (u *UserStore) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	query := `
+		SELECT id, name, password, email, age, gender, role
+		FROM users 
+		WHERE email=$1 AND is_active=true
+	`
+	var user User
+	err := u.db.QueryRowContext(ctx, query, email).Scan(
+		&user.ID,
+		&user.Name,
+		&user.Password.hash,
+		&user.Email,
+		&user.Age,
+		&user.Gender,
+		&user.Role,
 	)
 	if err != nil {
 		switch err {
@@ -80,7 +116,7 @@ func (u *UserStore) GetUserByID(ctx context.Context, id int64) (*User, error) {
 
 func (u *UserStore) create(ctx context.Context, tx *sql.Tx, user *User) error {
 	query := `
-		INSERT INTO users (name, password, email, age, gender)
+		INSERT INTO users (name, password, email, age, gender, role)
 		VALUES($1, $2, $3, $4, $5) RETURNING id
 	`
 	ctx, cancel := context.WithTimeout(ctx, QueryTimeOut)
@@ -92,10 +128,17 @@ func (u *UserStore) create(ctx context.Context, tx *sql.Tx, user *User) error {
 		user.Email,
 		user.Age,
 		user.Gender,
+		user.Role,
 	).Scan(
 		&user.ID,
 	)
 	if err != nil {
+		switch {
+		case err.Error() == `pq: duplicate key value violates unique constraint "users_name_key"`:
+			return ErrDupliName
+		case err.Error() == `pq: duplicate key value violates unique constraint "users_email_key"`:
+			return ErrDupliMail
+		}
 		return err
 	}
 	return nil
@@ -268,6 +311,7 @@ func (u *UserStore) DeleteUser(ctx context.Context, user *User) error {
 	defer cancel()
 
 	return withTx(u.db, ctx, func(tx *sql.Tx) error {
+		// The role check will be handled in the middleware
 		query := `
 			DELETE FROM users
 			WHERE id = $1

@@ -1,0 +1,9 @@
+ALTER TABLE users
+ADD COLUMN role INT NOT NULL REFERENCES roles(id) DEFAULT(1);
+
+UPDATE roles
+SET id = 1
+WHERE name = 'user';
+
+ALTER TABLE users
+ALTER COLUMN role DROP DEFAULT;

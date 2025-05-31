@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/Alter-Sitanshu/learning_Go/internal/auth"
 	"github.com/Alter-Sitanshu/learning_Go/internal/database"
 	"github.com/Alter-Sitanshu/learning_Go/internal/env"
 	"github.com/Alter-Sitanshu/learning_Go/internal/mailer"
@@ -33,6 +34,14 @@ func main() {
 			From:     env.GetString("COMP_ADDR", "example@gmail.com"),
 			Expiry:   time.Hour * 24 * 3,
 		},
+		auth: BasicAuthConfig{
+			username: env.GetString("ADMIN_USER", "admin"),
+			pass:     env.GetString("ADMIN_PASS", "admin"),
+			token: TokenConfig{
+				secret: env.GetString("APP_SECRET", "example"),
+				exp:    time.Hour * 24 * 3,
+			},
+		},
 	}
 
 	// Database initialisation
@@ -48,11 +57,18 @@ func main() {
 	defer db.Close()
 	psql := database.NewPostgresStorage(db)
 	mailer := mailer.NewSMTPSender(cfg.mail)
+	Hostname := "GOSocial"
+	jwt := auth.NewAuthenticator(
+		cfg.auth.token.secret,
+		Hostname,
+		Hostname,
+	)
 
 	app := &Application{
-		config: cfg,
-		store:  psql,
-		mailer: mailer,
+		config:        cfg,
+		store:         psql,
+		mailer:        mailer,
+		authenticator: jwt,
 	}
 
 	// Server Mux and Routing

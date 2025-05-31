@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Alter-Sitanshu/learning_Go/internal/auth"
 	"github.com/Alter-Sitanshu/learning_Go/internal/database"
 	"github.com/Alter-Sitanshu/learning_Go/internal/mailer"
 	"github.com/go-chi/chi/v5"
@@ -12,15 +13,28 @@ import (
 )
 
 type Application struct {
-	config Config
-	store  database.Storage
-	mailer *mailer.SMTPSender
+	config        Config
+	store         database.Storage
+	mailer        *mailer.SMTPSender
+	authenticator *auth.Authenticator
 }
 
 type Config struct {
 	addr string
 	db   DBConfig
 	mail mailer.SMTPConfig
+	auth BasicAuthConfig
+}
+
+type BasicAuthConfig struct {
+	username string
+	pass     string
+	token    TokenConfig
+}
+
+type TokenConfig struct {
+	secret string
+	exp    time.Duration
 }
 
 type DBConfig struct {
@@ -46,24 +60,26 @@ func (app *Application) mount() http.Handler {
 
 	// Routes for the API
 	router.Route("/v1", func(r chi.Router) {
-		r.Get("/health", app.HealthCheck)
+		r.With(app.BasicAuthMiddleware()).Get("/health", app.HealthCheck)
+
 		r.Route("/post", func(r chi.Router) {
+			r.Use(app.AuthorizationMiddleware)
 			r.Post("/", app.CreatPostHandler)
 			r.Route("/{id}", func(r chi.Router) {
 				// MIDDLEWARE TO ACCESS THE ID AND FETCH POST
 				r.Use(app.PostMiddleware)
 
 				r.Get("/", app.GetPostHandler)
-				r.Delete("/", app.DeletePostHandler)
-				r.Patch("/", app.UpdatePostHandler)
+				r.Delete("/", app.checkRoleMiddleware("admin", app.DeletePostHandler))
+				r.Patch("/", app.checkRoleMiddleware("moderator", app.UpdatePostHandler))
 				r.Post("/comment", app.CreateCommentHandler)
 			})
 
 		})
 		r.Route("/users", func(r chi.Router) {
+			// User Middleware
+			r.Use(app.AuthorizationMiddleware)
 			r.Route("/{userID}", func(r chi.Router) {
-				// User Middleware
-				r.Use(app.UserctxMiddleware)
 
 				r.Get("/", app.GetUserHandler)
 				r.Put("/follow", app.FollowUser)
@@ -75,7 +91,8 @@ func (app *Application) mount() http.Handler {
 			})
 		})
 		r.Route("/auth", func(r chi.Router) {
-			r.Put("/activate/{token}", app.AuthoriseHandler)
+			r.Post("/token", app.JWTHandler)
+			r.Put("/activate/{token}", app.ActivateUserHandler)
 			r.Post("/user", app.CreateUserHandler)
 		})
 

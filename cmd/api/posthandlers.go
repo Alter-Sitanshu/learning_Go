@@ -54,6 +54,7 @@ func jsonResponse(w http.ResponseWriter, status int, data any) error {
 
 func (app *Application) CreatPostHandler(w http.ResponseWriter, r *http.Request) {
 	var payload PostPayload
+	var res Response
 	if err := ReadJSON(w, r, &payload); err != nil {
 		log.Printf("%s", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
@@ -69,29 +70,28 @@ func (app *Application) CreatPostHandler(w http.ResponseWriter, r *http.Request)
 		})
 		return
 	}
+	user := getUserFromCtx(r)
 
 	post := database.Post{
 		Title:   payload.Title,
 		Content: payload.Content,
-		// TODO CHANGE AFTER AUTH
-		UserID: 1,
-		Tags:   payload.Tags,
+		UserID:  user.ID,
+		Tags:    payload.Tags,
 	}
 	ctx := r.Context()
 	err := app.store.Post().Create(ctx, &post)
 	if err != nil {
 		log.Printf("DB Error: %s", err.Error())
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf("Error creating post into database\n: %v", err)))
+		res.Message = fmt.Sprintf("Error creating post into database: %v", err)
+		jsonResponse(w, http.StatusInternalServerError, res)
 		return
 	}
 	if err := jsonResponse(w, http.StatusCreated, post); err != nil {
 		log.Printf("Error while encoding post: %s", err.Error())
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Error encoding post\n"))
+		res.Message = "Error encoding post"
+		jsonResponse(w, http.StatusInternalServerError, res)
 		return
 	}
-	jsonResponse(w, http.StatusCreated, post)
 }
 
 func (app *Application) GetPostHandler(w http.ResponseWriter, r *http.Request) {
@@ -166,6 +166,7 @@ func (app *Application) UpdatePostHandler(w http.ResponseWriter, r *http.Request
 
 func (app *Application) PostMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := getUserFromCtx(r)
 		postID := chi.URLParam(r, "id")
 		id, err := strconv.ParseInt(postID, 10, 64)
 		res := Response{
@@ -185,6 +186,12 @@ func (app *Application) PostMiddleware(next http.Handler) http.Handler {
 			jsonResponse(w, http.StatusNotFound, res)
 			return
 		}
+		if post.UserID != user.ID {
+			log.Printf("Restricted: Request for id: %d, but userid: %d", post.UserID, user.ID)
+			res.Message = "Restricted: Request Rejected"
+			jsonResponse(w, http.StatusNotAcceptable, res)
+			return
+		}
 		ctx = context.WithValue(ctx, postctx, post)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -200,9 +207,8 @@ func (app *Application) CreateCommentHandler(w http.ResponseWriter, r *http.Requ
 		Content string `json:"content" validate:"max=100"`
 	}
 	var payload commentPayload
-
-	// TODO : Change after Auth
-	userid := int64(1)
+	user := getUserFromCtx(r)
+	userid := user.ID
 
 	if err := ReadJSON(w, r, &payload); err != nil {
 		res.Message = "Incorrect data format"

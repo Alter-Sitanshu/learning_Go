@@ -71,15 +71,15 @@ func (app *Application) GetUserHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *Application) FollowUser(w http.ResponseWriter, r *http.Request) {
-	target := getUserFromCtx(r)
-	userID := int64(1)
+	targetID, _ := strconv.ParseInt(chi.URLParam(r, "userID"), 10, 64)
+	user := getUserFromCtx(r)
 
 	res := Response{
-		Message: fmt.Sprintf("Followed: %s", target.Name),
+		Message: fmt.Sprintf("Followed user with id: %d", targetID),
 	}
 
 	ctx := r.Context()
-	err := app.store.User().Follow(ctx, target.ID, userID)
+	err := app.store.User().Follow(ctx, targetID, user.ID)
 	if err != nil {
 		log.Printf("Error: %v\n", err.Error())
 		res.Message = err.Error()
@@ -90,15 +90,15 @@ func (app *Application) FollowUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *Application) UnfollowUser(w http.ResponseWriter, r *http.Request) {
-	target := getUserFromCtx(r)
-	userID := int64(1)
+	targetID, _ := strconv.ParseInt(chi.URLParam(r, "userID"), 10, 64)
+	user := getUserFromCtx(r)
 
 	res := Response{
-		Message: fmt.Sprintf("Unfollowed: %s", target.Name),
+		Message: fmt.Sprintf("Unfollowed user with id: %d", targetID),
 	}
 
 	ctx := r.Context()
-	err := app.store.User().Unfollow(ctx, target.ID, userID)
+	err := app.store.User().Unfollow(ctx, targetID, user.ID)
 	if err != nil {
 		log.Printf("Error: %v\n", err.Error())
 		res.Message = err.Error()
@@ -109,9 +109,7 @@ func (app *Application) UnfollowUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *Application) GetFeedHandler(w http.ResponseWriter, r *http.Request) {
-
-	// TODO : Change user id after AUTH
-	userid := int64(1)
+	userid := getUserFromCtx(r).ID
 	fq := &database.FilteringQuery{}
 	res := Response{
 		Message: "Feed fetched",
@@ -148,17 +146,20 @@ func (app *Application) CreateUserHandler(w http.ResponseWriter, r *http.Request
 	res := Response{
 		Message: "user created",
 	}
+	status := http.StatusCreated
 	err := ReadJSON(w, r, &payload)
 	if err != nil {
 		log.Printf("bad request: %v\n", err.Error())
 		res.Message = "bad request: Error while parsing"
-		jsonResponse(w, http.StatusBadRequest, res)
+		status = http.StatusBadRequest
+		jsonResponse(w, status, res)
 		return
 	}
 	if err = Validate.Struct(payload); err != nil {
 		log.Printf("bad request: %v\n", err.Error())
 		res.Message = err.Error()
-		jsonResponse(w, http.StatusBadRequest, res)
+		status = http.StatusBadRequest
+		jsonResponse(w, status, res)
 		return
 	}
 
@@ -166,12 +167,14 @@ func (app *Application) CreateUserHandler(w http.ResponseWriter, r *http.Request
 		Name:  payload.Name,
 		Email: payload.Email,
 		Age:   payload.Age,
+		Role:  1,
 	}
 
 	if err = user.Password.Hash(payload.Password); err != nil {
 		log.Printf("server error: %v\n", err.Error())
 		res.Message = "internal server error"
-		jsonResponse(w, http.StatusInternalServerError, res)
+		status = http.StatusInternalServerError
+		jsonResponse(w, status, res)
 		return
 	}
 
@@ -182,9 +185,19 @@ func (app *Application) CreateUserHandler(w http.ResponseWriter, r *http.Request
 	err = app.store.User().CreateAndInvite(ctx, user, hashToken, app.config.mail.Expiry)
 	if err != nil {
 		app.store.User().DeleteUser(ctx, user)
-		log.Printf("server error: %v\n", err.Error())
-		res.Message = "internal server error"
-		jsonResponse(w, http.StatusInternalServerError, res)
+		switch err {
+		case database.ErrDupliMail:
+			res.Message = "email already exists"
+			status = http.StatusBadRequest
+		case database.ErrDupliName:
+			res.Message = "name taken"
+			status = http.StatusBadRequest
+		default:
+			res.Message = "internal server error"
+			status = http.StatusInternalServerError
+		}
+		log.Printf("error occured while creating user: %v\n", err.Error())
+		jsonResponse(w, status, res)
 		return
 	}
 
@@ -204,9 +217,9 @@ func (app *Application) CreateUserHandler(w http.ResponseWriter, r *http.Request
 	}
 	err = app.mailer.SendEmail(req)
 	if err != nil {
-		app.store.User().DeleteUser(ctx, user)
-		log.Printf("server error: %v\n", err.Error())
-		res.Message = "internal server error"
+		app.store.User().DeleteUser(ctx, user) // (SAGA) pattern
+		log.Printf("encountered error sending mail: %v\n", err.Error())
+		res.Message = "error sending email, retry"
 		jsonResponse(w, http.StatusInternalServerError, res)
 		return
 	}

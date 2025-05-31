@@ -12,11 +12,14 @@ const QueryTimeOut = time.Minute * 3
 var (
 	ErrNotFound     = errors.New("not found")
 	ErrTokenExpired = errors.New("invalid or expired token")
+	ErrDupliMail    = errors.New("email already exists")
+	ErrDupliName    = errors.New("name taken")
 )
 
 type UserInterface interface {
 	create(context.Context, *sql.Tx, *User) error
 	GetUserByID(context.Context, int64) (*User, error)
+	GetUserByEmail(context.Context, string) (*User, error)
 	Follow(context.Context, int64, int64) error
 	Unfollow(context.Context, int64, int64) error
 	GetFeed(context.Context, int64, *FilteringQuery) ([]Feed, error)
@@ -38,10 +41,15 @@ type CommentInterface interface {
 	CreateComment(context.Context, *Comment) error
 }
 
+type RoleInterface interface {
+	GetRole(context.Context, string) (*Role, error)
+}
+
 type Storage interface {
 	User() UserInterface
 	Post() PostInterface
 	Comment() CommentInterface
+	Role() RoleInterface
 }
 
 type PostgresRepo struct {
@@ -66,4 +74,8 @@ func (psql *PostgresRepo) Post() PostInterface {
 
 func (psql *PostgresRepo) Comment() CommentInterface {
 	return &CommentStore{db: psql.db}
+}
+
+func (psql *PostgresRepo) Role() RoleInterface {
+	return &RoleStore{db: psql.db}
 }
