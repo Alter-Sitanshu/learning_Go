@@ -1,29 +1,24 @@
-# Start with the official Golang image as a build stage
+# --- Build stage ---
 FROM golang:1.24 AS builder
 
-# Set working directory inside the container
 WORKDIR /app
 
-# Copy go.mod and go.sum first (for caching)
+# Cache dependencies
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy the rest of the code
+# Copy source and build
 COPY . .
+RUN go build -o /bin/main ./cmd
 
-# Build the Go binary
-RUN go build -o bin/main ./cmd
-
-# Start a smaller runtime image (optional but recommended)
-FROM debian:bullseye-slim
+# --- Runtime stage ---
+FROM golang:1.24
 
 WORKDIR /app
 
-# Copy the binary from the builder stage
-COPY --from=builder /app/bin/main .
+COPY --from=builder /bin/main .
+COPY .env .env
 
-# Expose the port your app uses
 EXPOSE 8080
 
-# Run the binary
 CMD ["./main"]
